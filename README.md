@@ -11,16 +11,16 @@ Usage:
 - Example: compile and run the test:
 
   - GCC:
-    gcc -std=c11 -O2 test.c -o test_arenalib ; ./test_arenalib
-    g++ -std=c++11 -O2 testcpp.cpp -o testcpp_arenalib ; ./testcpp_arenalib
+    gcc -std=c11 -O2 arenalib_test_c.c -o test_c_arenalib ; ./test_c_arenalib
+    g++ -std=c++11 -O2 arenalib_test_cpp.cpp -o test_cpp_arenalib ; ./test_cpp_arenalib
   ----------------------------------------------------------------------------
   - Clang:
-    clang -std=c11 -O2 test.c -o test_arenalib ; ./test_arenalib
-    clang++ -std=c++11 -O2 testcpp.cpp -o testcpp_arenalib ; ./testcpp_arenalib
+    clang -std=c11 -O2 arenalib_test_c.c -o test_c_arenalib ; ./test_c_arenalib
+    clang++ -std=c++11 -O2 arenalib_test_cpp.cpp -o test_cpp_arenalib ; ./test_cpp_arenalib
   ----------------------------------------------------------------------------
   - MSVC:
-    cl /std:c11 /O2 test.c /Fe:test_arenalib.exe && test_arenalib.exe
-    cl /std:c++14 /O2 testcpp.cpp /Fe:testcpp_arenalib.exe && testcpp_arenalib.exe-
+    cl /std:c11 /O2 arenalib_test_c.c /Fe:test_c_arenalib.exe && test_c_arenalib.exe
+    cl /std:c++14 /O2 arenalib_test_cpp.cpp /Fe:test_cpp_arenalib.exe && test_cpp_arenalib.exe-
 
 - Compatible versions:
 
