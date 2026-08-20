@@ -79,7 +79,7 @@ int main(void) {
 
     /* arenalib_arena_get_marker (Saves the current state of the arena) */
     arenalib_marker_t temporary_marker = arenalib_arena_get_marker(&arena);
-    printf("Marker saved at used position: %zu\n", temporary_marker);
+    printf("Marker saved at used position: %zu\n", temporary_marker.used);
 
     /* Make temporary allocations that we will discard later */
     arenalib_arena_malloc(&arena, 200);

@@ -79,7 +79,7 @@ int main() {
 
     // arenalib::get_marker (Saves the current state of the arena)
     arenalib::marker_t temporary_marker = arenalib::get_marker(&arena);
-    std::cout << "Marker saved at position: " << temporary_marker << "\n";
+    std::cout << "Marker saved at position: " << temporary_marker.used << "\n";
 
     // Make temporary allocations that we will discard later
     arenalib::malloc(&arena, 150);

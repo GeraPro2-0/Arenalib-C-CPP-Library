@@ -24,7 +24,7 @@ Usage:
 
 - Compatible versions:
 
-  C: Compatible from C89/C90 onwards (safely degrades features like C11 _Atomic into standard types and loops when not supported).
+  C: Compatible from C89/C90 onwards.
   C++ (using ONLY C functions): Compatible from C++98 onwards.
   C++ (using C++'s own features): Compatible from C++11 onwards (C++14+ recommended for modern projects).
 
@@ -35,7 +35,7 @@ Usage:
 ## Features
 - **Header-only**: Drop `arenalib.h` into your project source and you are ready to go.
 - **Portability**: Supports classic legacy C standards (C89/C99 fallbacks), modern C11/C21 features, and full C++ namespace encapsulation.
-- **Thread-Safe Global Pool**: Automatically scales by acquiring 1MB memory blocks via non-blocking atomic compare-and-swap (`__atomic_compare_exchange_n`) bitmaps when built with modern compilers.
+- **Atomic Pool Bitmap**: Automatically scales by acquiring 1MB memory blocks via an atomic bitmap when compiler atomics are available. Individual arenas are not thread-safe; synchronize calls made from multiple threads externally.
 - **Generational Secure IDs**: Eliminates dangling pointers completely by replacing raw pointers with static index tokens bound to strict temporal generation counters.
 - **Deterministic Alignment**: Hand-rolled pointer math forces memory boundaries to stick to target alignment sizes (e.g., 16, 32, or 64-byte chunks for SIMD operations).
 
