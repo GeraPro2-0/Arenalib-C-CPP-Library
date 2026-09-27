@@ -39,6 +39,14 @@ Usage:
 - **Generational Secure IDs**: Eliminates dangling pointers completely by replacing raw pointers with static index tokens bound to strict temporal generation counters.
 - **Deterministic Alignment**: Hand-rolled pointer math forces memory boundaries to stick to target alignment sizes (e.g., 16, 32, or 64-byte chunks for SIMD operations).
 
+## Allocation contract
+
+- Allocation bookkeeping uses the active tail block, so `malloc` and `malloc_align` do not traverse the block chain. Pool selection is bounded by the configured maximum of 64 blocks.
+- `free` reclaims memory only when the pointer and size describe the most recent allocation in the active tail block. Other frees are ignored.
+- `realloc` resizes that tail allocation in place when possible; otherwise it allocates and copies, so the copy cost depends on the requested data size.
+- Markers can be released only while their block is still the active tail. `reset` and `destroy` walk allocated pool blocks to return them to the pool.
+- ID indices and generations are both 32-bit values.
+
 Notes:
 - Defines core allocation macros and signatures:
   - `arenalib_arena_init`, `arenalib_arena_reset`, `arenalib_arena_destroy`

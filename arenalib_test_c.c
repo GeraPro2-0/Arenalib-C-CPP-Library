@@ -125,6 +125,24 @@ int main(void)
         printf("Success: Access denied. The ID is now invalid (Dangling pointer prevented).\n");
     }
 
+    arena.generations[entity_id.index] = 0xFFFFu;
+    {
+        arenalib_id_t wide_generation_id = arenalib_arena_alloc_id(&arena, 16);
+        if (wide_generation_id.generation != 0xFFFFu)
+        {
+            printf("Error: Failed to preserve the 32-bit ID generation.\n");
+            return 1;
+        }
+        arenalib_arena_free_id(&arena, wide_generation_id);
+        wide_generation_id = arenalib_arena_alloc_id(&arena, 16);
+        if (wide_generation_id.generation != 0x10000u)
+        {
+            printf("Error: ID generation wrapped at 16 bits.\n");
+            return 1;
+        }
+        arenalib_arena_free_id(&arena, wide_generation_id);
+    }
+
     /* Verification against the default invalid ID macro */
     arenalib_id_t invalid_id_check = ARENALIB_INVALID_ID;
     if (entity_id.index != invalid_id_check.index)

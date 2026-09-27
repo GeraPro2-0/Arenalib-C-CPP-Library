@@ -135,11 +135,11 @@ extern "C"
 
     typedef void (*arenalib_oom_callback_t)(void *user_data, arenalib_size_t size_requested);
 
-    /* Structure for secure IDs (32-bit index, 16-bit generation) */
+    /* Structure for secure IDs (32-bit index, 32-bit generation) */
     typedef struct arenalib_id_t
     {
         uint32_t index;
-        uint16_t generation;
+        uint32_t generation;
     } arenalib_id_t;
 
     /* Portable invalid ID provider: prefer function over compound-literal macro
@@ -148,7 +148,7 @@ extern "C"
     {
         arenalib_id_t id;
         id.index = 0xFFFFFFFFu;
-        id.generation = (uint16_t)0xFFFFu;
+        id.generation = 0xFFFFFFFFu;
         return id;
     }
 
@@ -173,7 +173,7 @@ extern "C"
         arenalib_oom_callback_t oom_callback;
         void *oom_user_data;
 
-        uint16_t *generations;
+        uint32_t *generations;
         uint32_t *offsets;
         uint32_t *free_next;
         uint32_t max_items;
@@ -181,6 +181,7 @@ extern "C"
         uint32_t free_head;
 
         struct arenalib_arena_t *next;
+        struct arenalib_arena_t *tail;
         arenalib_size_t block_alloc_size;
         int is_dynamic;
         int pool_index;
@@ -296,6 +297,7 @@ extern "C"
         arena->storage = storage;
         arena->oom_callback = NULL;
         arena->oom_user_data = NULL;
+        arena->tail = arena;
 
         arena->max_items = max_ids;
         arena->item_count = 0;
@@ -303,7 +305,7 @@ extern "C"
         if (max_ids > 0)
         {
             /* Detect multiplication overflow in metadata size calculation */
-            per_item = sizeof(uint16_t) + sizeof(uint32_t) + sizeof(uint32_t);
+            per_item = sizeof(uint32_t) + sizeof(uint32_t) + sizeof(uint32_t);
             if (max_ids > (arenalib_size_t)-1 / per_item)
             {
                 return 0; /* Overflow in meta_size calculation */
@@ -322,9 +324,9 @@ extern "C"
                 return 0;
             }
 
-            arena->generations = (uint16_t *)(arena->data + arena->capacity - meta_size);
+            arena->generations = (uint32_t *)(arena->data + arena->capacity - meta_size);
             /* Validate generations pointer is within allocated memory */
-            if (arena->generations < (uint16_t *)arena->data)
+            if (arena->generations < (uint32_t *)arena->data)
             {
                 return 0; /* Pointer calculation failed */
             }
@@ -339,7 +341,7 @@ extern "C"
                 return 0; /* Metadata pointers out of bounds */
             }
 
-            arenalib_memset(arena->generations, 0, arena->max_items * sizeof(uint16_t));
+            arenalib_memset(arena->generations, 0, arena->max_items * sizeof(uint32_t));
             arenalib_memset(arena->offsets, 0xFF, arena->max_items * sizeof(uint32_t));
 
             {
@@ -362,6 +364,7 @@ extern "C"
         }
 
         arena->next = NULL;
+        arena->tail = arena;
         arena->block_alloc_size = capacity;
         arena->is_dynamic = 0;
         arena->pool_index = -1;
@@ -487,6 +490,7 @@ extern "C"
         arena->last_size = 0;
         arena->item_count = 0;
         arena->next = NULL;
+        arena->tail = arena;
 
         if (arena->offsets && arena->max_items > 0)
         {
@@ -525,7 +529,6 @@ extern "C"
     {
         arenalib_size_t aligned_size;
         arenalib_arena_t *current;
-        int chain_depth;
         int block_idx;
         unsigned char *ptr;
         if (!arena || size == 0)
@@ -539,22 +542,7 @@ extern "C"
             return NULL; /* Overflow or size too large */
         }
 
-        current = arena;
-
-        /* Defensive: limit chain depth to prevent infinite loops */
-        chain_depth = 0;
-        while (current->next != NULL)
-        {
-            if (chain_depth++ > ARENALIB_POOL_BLOCKS)
-            {
-                if (arena->oom_callback)
-                {
-                    arena->oom_callback(arena->oom_user_data, size);
-                }
-                return NULL; /* Corrupted chain */
-            }
-            current = current->next;
-        }
+        current = arena->tail ? arena->tail : arena;
 
         if (aligned_size > arenalib_arena_available(current))
         {
@@ -579,6 +567,7 @@ extern "C"
 
             current->next = (arenalib_arena_t *)&g_arena_pool[block_idx].storage;
             current = current->next;
+            arena->tail = current;
         }
 
         /* Defensive: check for overflow in used + aligned_size */
@@ -622,7 +611,6 @@ extern "C"
     {
         arenalib_size_t aligned_size;
         arenalib_arena_t *current;
-        int chain_depth;
         if (!arena || !ptr || size == 0)
         {
             return;
@@ -632,40 +620,16 @@ extern "C"
         if (aligned_size == 0)
             return; /* Overflow in alignment */
 
-        current = arena;
-        chain_depth = 0;
-
-        while (current != NULL)
+        current = arena->tail ? arena->tail : arena;
+        if (current->data && current->capacity > 0 &&
+            current->last_size == aligned_size && current->used >= current->last_size)
         {
-            /* Limit chain depth to prevent infinite loops */
-            if (chain_depth++ > ARENALIB_POOL_BLOCKS)
+            unsigned char *expected = current->data + (current->used - current->last_size);
+            if ((unsigned char *)ptr == expected)
             {
-                return; /* Corrupted chain */
+                current->used -= current->last_size;
+                current->last_size = 0;
             }
-
-            /* Defensive: verify data pointer and capacity are sane */
-            if (!current->data || current->capacity == 0)
-            {
-                current = current->next;
-                continue;
-            }
-
-            /* We check if the pointer falls within the memory range of this specific arena */
-            if ((unsigned char *)ptr >= current->data && (unsigned char *)ptr < (current->data + current->capacity))
-            {
-                /* Defensive: verify used >= last_size before subtraction */
-                if (current->last_size == aligned_size && current->used >= current->last_size)
-                {
-                    unsigned char *expected = current->data + (current->used - current->last_size);
-                    if ((unsigned char *)ptr == expected)
-                    {
-                        current->used -= current->last_size;
-                        current->last_size = 0;
-                    }
-                }
-                return;
-            }
-            current = current->next;
         }
     }
 
@@ -678,7 +642,6 @@ extern "C"
         arenalib_size_t copy_size;
         arenalib_arena_t *current;
         unsigned char *current_last;
-        int chain_depth;
         void *new_ptr;
         if (!arena)
             return NULL;
@@ -696,23 +659,9 @@ extern "C"
             return NULL;
         }
 
-        current = arena;
-        chain_depth = 0;
-
-        while (current != NULL)
+        current = arena->tail ? arena->tail : arena;
+        if (current->data && current->capacity > 0 && current->used >= current->last_size)
         {
-            if (chain_depth++ > ARENALIB_POOL_BLOCKS)
-            {
-                return NULL; /* Corrupted chain */
-            }
-
-            /* Defensive: verify used >= last_size before subtraction */
-            if (!current->data || current->capacity == 0 || current->used < current->last_size)
-            {
-                current = current->next;
-                continue;
-            }
-
             current_last = current->data + (current->used - current->last_size);
 
             if ((unsigned char *)ptr == current_last && aligned_old == current->last_size)
@@ -739,9 +688,7 @@ extern "C"
                         return ptr;
                     }
                 }
-                break;
             }
-            current = current->next;
         }
 
         new_ptr = arenalib_arena_malloc(arena, new_size);
@@ -794,6 +741,7 @@ extern "C"
         arena->item_count = 0;
         arena->free_head = 0xFFFFFFFF;
         arena->next = NULL;
+        arena->tail = NULL;
         arena->pool_index = -1;
     }
 
@@ -810,7 +758,6 @@ extern "C"
     {
         arenalib_size_t aligned_size;
         arenalib_arena_t *current;
-        int chain_depth;
         unsigned char *current_ptr;
         void *aligned_ptr;
         arenalib_size_t adjustment;
@@ -823,14 +770,7 @@ extern "C"
         if (aligned_size == 0)
             return NULL;
 
-        current = arena;
-        chain_depth = 0;
-        while (current->next != NULL)
-        {
-            if (chain_depth++ > ARENALIB_POOL_BLOCKS)
-                return NULL;
-            current = current->next;
-        }
+        current = arena->tail ? arena->tail : arena;
 
         if (!current->data || current->used > current->capacity)
             return NULL;
@@ -868,6 +808,7 @@ extern "C"
 
             current->next = (arenalib_arena_t *)&g_arena_pool[block_idx].storage;
             current = current->next;
+            arena->tail = current;
             current_ptr = current->data + current->used;
             aligned_ptr = arenalib_align_ptr(current_ptr, alignment);
             if (!aligned_ptr)
@@ -905,11 +846,7 @@ extern "C"
         marker.used = 0;
         if (arena)
         {
-            const arenalib_arena_t *current = arena;
-            while (current->next != NULL)
-            {
-                current = current->next;
-            }
+            const arenalib_arena_t *current = arena->tail ? arena->tail : arena;
             marker.block = (arenalib_arena_t *)current;
             marker.used = current->used;
         }
@@ -918,42 +855,12 @@ extern "C"
 
     ARENALIB_INLINE void arenalib_arena_release_marker(arenalib_arena_t *arena, arenalib_marker_t marker)
     {
-        if (arena && marker.block)
+        if (arena && marker.block && marker.block == arena->tail)
         {
-            arenalib_arena_t *current = arena;
-            arenalib_arena_t *marked_block = NULL;
-            int chain_depth = 0;
-            while (current != NULL)
-            {
-                if (current == marker.block)
-                {
-                    marked_block = current;
-                    break;
-                }
-                if (chain_depth++ > ARENALIB_POOL_BLOCKS)
-                    return;
-                current = current->next;
-            }
-            if (!marked_block || marker.used > marked_block->used)
+            arenalib_arena_t *marked_block = marker.block;
+            if (marker.used > marked_block->used)
                 return;
 
-            current = marked_block->next;
-            while (current != NULL)
-            {
-                arenalib_arena_t *next_block = current->next;
-                int idx = current->pool_index;
-                if (idx >= 0 && idx < ARENALIB_POOL_BLOCKS)
-                {
-                    uint64_t mask = ~((uint64_t)1 << idx);
-#if ARENALIB_HAS_ATOMICS || defined(__GNUC__) || defined(__clang__)
-                    ARENALIB_ATOMIC_CLEAR(&g_pool_bitmap, mask);
-#else
-                g_pool_bitmap &= mask;
-#endif
-                }
-                current = next_block;
-            }
-            marked_block->next = NULL;
             marked_block->used = marker.used;
             marked_block->last_size = 0;
 
@@ -1177,9 +1084,9 @@ namespace arenalib
     }
 
 #if defined(__cpp_constexpr) || (defined(__cplusplus) && __cplusplus >= 201103L)
-    static constexpr id_t invalid_id = {0xFFFFFFFF, 0xFFFF};
+    static constexpr id_t invalid_id = {0xFFFFFFFF, 0xFFFFFFFF};
 #else
-    static const id_t invalid_id = {0xFFFFFFFF, 0xFFFF};
+    static const id_t invalid_id = {0xFFFFFFFF, 0xFFFFFFFF};
 #endif
 
     inline id_t alloc_id(arena_t *arena, arenalib_size_t size)

@@ -128,6 +128,22 @@ int main()
         std::cout << "Success: Access denied. The ID is now invalid (Dangling pointer prevented).\n";
     }
 
+    arena.generations[entity_id.index] = 0xFFFFu;
+    arenalib::id_t wide_generation_id = arenalib::alloc_id(&arena, 16);
+    if (wide_generation_id.generation != 0xFFFFu)
+    {
+        std::cerr << "Error: Failed to preserve the 32-bit ID generation.\n";
+        return 1;
+    }
+    arenalib::free_id(&arena, wide_generation_id);
+    wide_generation_id = arenalib::alloc_id(&arena, 16);
+    if (wide_generation_id.generation != 0x10000u)
+    {
+        std::cerr << "Error: ID generation wrapped at 16 bits.\n";
+        return 1;
+    }
+    arenalib::free_id(&arena, wide_generation_id);
+
     // Checking against the C++ constant 'invalid_id'
     if (entity_id.index != arenalib::invalid_id.index)
     {
