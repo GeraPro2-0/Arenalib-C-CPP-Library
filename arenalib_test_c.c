@@ -125,22 +125,36 @@ int main(void)
         printf("Success: Access denied. The ID is now invalid (Dangling pointer prevented).\n");
     }
 
-    arena.generations[entity_id.index] = 0xFFFFu;
+    arena.generations[entity_id.index] = 0xFFFFFFFFu;
     {
         arenalib_id_t wide_generation_id = arenalib_arena_alloc_id(&arena, 16);
-        if (wide_generation_id.generation != 0xFFFFu)
+        if (wide_generation_id.generation != 0xFFFFFFFFu)
         {
             printf("Error: Failed to preserve the 32-bit ID generation.\n");
             return 1;
         }
         arenalib_arena_free_id(&arena, wide_generation_id);
-        wide_generation_id = arenalib_arena_alloc_id(&arena, 16);
-        if (wide_generation_id.generation != 0x10000u)
+        wide_generation_id = arenalib_arena_alloc_id(&arena, 32);
+        if (wide_generation_id.generation != 0u)
         {
-            printf("Error: ID generation wrapped at 16 bits.\n");
+            printf("Error: ID generation wrapped at 32 bits.\n");
             return 1;
         }
         arenalib_arena_free_id(&arena, wide_generation_id);
+    }
+
+    {
+        arenalib_id_t id_before_marker = arenalib_arena_alloc_id(&arena, 24);
+        arenalib_marker_t id_marker = arenalib_arena_get_marker(&arena);
+        arenalib_id_t id_after_marker = arenalib_arena_alloc_id(&arena, 24);
+        arenalib_arena_release_marker(&arena, id_marker);
+        if (arenalib_arena_get_ptr(&arena, id_before_marker) == NULL ||
+            arenalib_arena_get_ptr(&arena, id_after_marker) != NULL)
+        {
+            printf("Error: Marker rollback did not preserve/invalidate the expected IDs.\n");
+            return 1;
+        }
+        arenalib_arena_free_id(&arena, id_before_marker);
     }
 
     /* Verification against the default invalid ID macro */
@@ -171,13 +185,81 @@ int main(void)
     void *impossible_block = arenalib_arena_malloc(&arena, ARENALIB_POOL_BLOCK_SIZE * 2);
     (void)impossible_block; /* Suppress unused variable warning */
 
+    printf("\n--- Stress test: repeated allocation/reset under load ---\n");
+    {
+        #define STRESS_CAPACITY 16384
+        unsigned char stress_storage[STRESS_CAPACITY];
+        arenalib_arena_t stress_arena;
+        int i;
+        int j;
+
+        if (!arenalib_arena_init(&stress_arena, stress_storage, STRESS_CAPACITY, 0))
+        {
+            printf("Error: Failed to initialize the stress arena.\n");
+            return 1;
+        }
+
+        for (i = 0; i < 200; ++i)
+        {
+            void *blocks[32];
+            for (j = 0; j < 32; ++j)
+            {
+                arenalib_size_t block_size = (arenalib_size_t)(8 + (((i * 17) + (j * 13)) % 256));
+                blocks[j] = arenalib_arena_malloc(&stress_arena, block_size);
+                if (!blocks[j])
+                {
+                    printf("Stress test failed at iteration %d, block %d.\n", i, j);
+                    arenalib_arena_destroy(&stress_arena);
+                    return 1;
+                }
+                arenalib_memset(blocks[j], (i + j) & 0xFF, block_size);
+            }
+
+            if (!arenalib_arena_malloc(&stress_arena, 600000) ||
+                !arenalib_arena_malloc(&stress_arena, 600000))
+            {
+                printf("Stress test failed to acquire a pool block at iteration %d.\n", i);
+                arenalib_arena_destroy(&stress_arena);
+                return 1;
+            }
+            arenalib_arena_reset(&stress_arena);
+        }
+
+        printf("Stress test passed: 200 allocation/reset rounds completed.\n");
+        arenalib_arena_destroy(&stress_arena);
+    }
+
     /* =========================================================================
      *  VI. CLEANUP AND DESTRUCTION
      *  =========================================================================
      */
 
     /* arenalib_arena_reset (Frees pool blocks and sets usage tracking counters back to 0) */
-    arenalib_arena_reset(&arena);
+    {
+        unsigned char reset_storage[256];
+        arenalib_arena_t reset_arena;
+        arenalib_id_t id_before_reset;
+        if (!arenalib_arena_init(&reset_arena, reset_storage, sizeof(reset_storage), 2))
+        {
+            printf("Error: Failed to initialize the reset test arena.\n");
+            return 1;
+        }
+        id_before_reset = arenalib_arena_alloc_id(&reset_arena, 16);
+        if (id_before_reset.index == 0xFFFFFFFFu)
+        {
+            printf("Error: Failed to allocate the reset test ID.\n");
+            arenalib_arena_destroy(&reset_arena);
+            return 1;
+        }
+        arenalib_arena_reset(&reset_arena);
+        if (arenalib_arena_get_ptr(&reset_arena, id_before_reset) != NULL)
+        {
+            printf("Error: Arena reset did not invalidate an active ID.\n");
+            arenalib_arena_destroy(&reset_arena);
+            return 1;
+        }
+        arenalib_arena_destroy(&reset_arena);
+    }
     printf("\nArena reset complete. Backing capacity restored to baseline.\n");
 
     /* arenalib_arena_destroy (Clears structural data references completely) */
